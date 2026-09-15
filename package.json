@@ -1,0 +1,61 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "flow",
+  "title": "Flow",
+  "description": "One box in, two statuses out. Capture a thought without deciding where it goes.",
+  "icon": "command-icon.png",
+  "author": "joe",
+  "categories": [
+    "Productivity"
+  ],
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "capture",
+      "title": "Capture",
+      "subtitle": "Flow",
+      "description": "Write down a thought and get out of the way",
+      "mode": "no-view",
+      "arguments": [
+        {
+          "name": "text",
+          "placeholder": "thought #project @tag",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "tasks",
+      "title": "Tasks",
+      "subtitle": "Flow",
+      "description": "Everything still to do",
+      "mode": "view"
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.83.0"
+  },
+  "devDependencies": {
+    "@raycast/eslint-config": "^1.0.11",
+    "@types/node": "^20.8.10",
+    "@types/react": "18.3.12",
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.5",
+    "typescript": "^5.4.5"
+  },
+  "scripts": {
+    "build": "ray build -e dist",
+    "dev": "ray develop",
+    "lint": "ray lint",
+    "fix-lint": "ray lint --fix",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.cli.json",
+    "build:cli": "tsc -p tsconfig.cli.json"
+  },
+  "overrides": {
+    "@types/react": "18.3.12"
+  },
+  "bin": {
+    "flow": "./bin/flow"
+  }
+}

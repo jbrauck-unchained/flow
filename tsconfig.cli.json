@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "include": [
+    "src/cli/**/*",
+    "src/lib/store.ts",
+    "src/lib/score.ts",
+    "src/lib/item.ts"
+  ],
+  "compilerOptions": {
+    "lib": [
+      "ES2023"
+    ],
+    "module": "commonjs",
+    "target": "ES2022",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "moduleResolution": "node",
+    "outDir": "dist-cli",
+    "rootDir": "src",
+    "noEmit": false
+  }
+}

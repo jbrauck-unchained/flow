@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Runs the prioritization pass once each weekday morning at 08:30.
+
+  Once, at a boundary — not hourly. Output is pull, not push: it improves the list,
+  and opening the list is the trigger.
+
+  Install:
+    cp agents/com.flow.prioritize.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.flow.prioritize.plist
+  Check:
+    launchctl list | grep flow
+    tail ~/.flow/prioritize.log
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.flow.prioritize</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>REPLACE_WITH_REPO_PATH/agents/run-prioritize.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>8</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>8</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>8</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>8</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>8</integer><key>Minute</key><integer>30</integer></dict>
+  </array>
+  <key>StandardOutPath</key>
+  <string>/tmp/flow-prioritize.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/flow-prioritize.log</string>
+</dict>
+</plist>
