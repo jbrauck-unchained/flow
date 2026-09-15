@@ -17,9 +17,13 @@ mkdir -p "$FLOW_DIR"
 SINCE=0
 [ -f "$STAMP" ] && SINCE="$(cat "$STAMP")"
 
-# Make `flow` reachable and tell the CLI who is writing, so these changes are
-# distinguishable from the owner's in the journal.
-export PATH="$HERE/../bin:$PATH"
+# Make `flow` reachable. Prefer the installed copy; fall back to a local build so
+# the runner still works in a checkout that has not been installed yet.
+export PATH="$HOME/.local/bin:$HERE/../dist-cli:$PATH"
+if ! command -v flow >/dev/null 2>&1; then
+  echo "run-prioritize: no 'flow' on PATH - run 'npm run install:cli'" >&2
+  exit 1
+fi
 export FLOW_ACTOR="agent:prioritize"
 export SINCE
 

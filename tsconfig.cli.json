@@ -16,8 +16,6 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "moduleResolution": "node",
-    "outDir": "dist-cli",
-    "rootDir": "src",
-    "noEmit": false
+    "noEmit": true
   }
 }

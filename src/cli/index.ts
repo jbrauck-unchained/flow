@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import {
@@ -34,6 +33,11 @@ import { DEFAULT_WEIGHTS, scoreItem } from "../lib/score";
 import { AGENTS_MD } from "./agents-md";
 
 const STALE_MS = 14 * 24 * 60 * 60 * 1000;
+
+// Replaced by the bundler. The installed binary is a copy, so it can silently
+// drift from source — this is how you tell.
+declare const __FLOW_BUILT__: string;
+const BUILT = typeof __FLOW_BUILT__ === "string" ? __FLOW_BUILT__ : "dev";
 
 interface Args {
   positional: string[];
@@ -153,6 +157,7 @@ const USAGE = `flow — agent-native capture
   flow archive <id...> [--reason R]           flow accept <askId>
   flow snapshot [-m MESSAGE]                  commit ~/.flow
   flow init                                   contract, weights, git repo
+  flow version                                which build is installed
 
   --actor agent:<name>   identify yourself (or set FLOW_ACTOR)
 `;
@@ -403,6 +408,11 @@ async function main(): Promise<void> {
     case "snapshot": {
       const message = typeof flags.m === "string" ? flags.m : rest.join(" ") || "flow: snapshot";
       out((await snapshot(message)) ? "committed" : "nothing to commit");
+      return;
+    }
+
+    case "version": {
+      out(`flow (built ${BUILT})`);
       return;
     }
 

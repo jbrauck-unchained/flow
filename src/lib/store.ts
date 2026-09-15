@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, rename, unlink, writeFile } from "fs/promises";
+import { appendFile, mkdir, open, readFile, rename, stat, unlink, writeFile } from "fs/promises";
 import { spawn } from "child_process";
 import { homedir } from "os";
 import { join } from "path";
@@ -120,6 +120,70 @@ async function writeItems(items: Item[]): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Locking
+// ---------------------------------------------------------------------------
+
+/** Long enough that a live holder is never mistaken for a dead one. */
+const LOCK_STALE_MS = 5_000;
+const LOCK_TIMEOUT_MS = 15_000;
+const LOCK_RETRY_MS = 12;
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Runs fn while holding an exclusive on-disk lock.
+ *
+ * Atomic writes stop a reader seeing half a file, but they do nothing about two
+ * writers that both read, both decide, and both write — the second silently
+ * discards the first. Every read-modify-write in here has to be one critical
+ * section, and `open(path, "wx")` is the primitive that gives us that: exclusive
+ * create is atomic, so exactly one caller wins the race to create the file.
+ *
+ * A holder that crashes would otherwise wedge the list permanently, so a lock
+ * older than LOCK_STALE_MS is treated as abandoned and broken.
+ */
+async function withLock<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  await mkdir(FLOW_DIR, { recursive: true });
+  const lockPath = join(FLOW_DIR, `${name}.lock`);
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  let held = false;
+
+  while (!held) {
+    try {
+      const handle = await open(lockPath, "wx");
+      await handle.writeFile(`${process.pid}`).catch(() => undefined);
+      await handle.close();
+      held = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+
+      try {
+        const info = await stat(lockPath);
+        if (Date.now() - info.mtimeMs > LOCK_STALE_MS) {
+          await unlink(lockPath).catch(() => undefined);
+          continue;
+        }
+      } catch {
+        continue; // Released between our open and our stat — just try again.
+      }
+
+      if (Date.now() > deadline) {
+        // Failing loudly beats writing anyway and losing someone else's work.
+        throw new Error(`could not lock ${name} after ${LOCK_TIMEOUT_MS}ms (${lockPath})`);
+      }
+      // Jittered, so queued writers don't all wake at the same instant.
+      await sleep(LOCK_RETRY_MS + Math.random() * LOCK_RETRY_MS);
+    }
+  }
+
+  try {
+    return await fn();
+  } finally {
+    await unlink(lockPath).catch(() => undefined);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // The one write path
 // ---------------------------------------------------------------------------
 
@@ -211,14 +275,16 @@ function diff(actor: Actor, before: Item[], after: Item[], ts: number, undoOf?: 
  * no longer clobber a write it never saw.
  */
 export async function mutate(actor: Actor, apply: (items: Item[]) => Item[], undoOf?: number): Promise<Item[]> {
-  const before = await loadItems();
-  const after = apply(before);
-  const ts = Date.now();
-  const entries = diff(actor, before, after, ts, undoOf);
-  if (entries.length === 0) return before;
-  await writeItems(after);
-  await appendJsonl(JOURNAL_FILE, entries);
-  return after;
+  return withLock("items", async () => {
+    const before = await loadItems();
+    const after = apply(before);
+    const ts = Date.now();
+    const entries = diff(actor, before, after, ts, undoOf);
+    if (entries.length === 0) return before;
+    await writeItems(after);
+    await appendJsonl(JOURNAL_FILE, entries);
+    return after;
+  });
 }
 
 export async function addItem(input: string, actor: Actor = "owner", extra?: Partial<Item>): Promise<Item> {
@@ -489,14 +555,20 @@ export async function addAsk(ask: Omit<Ask, "id" | "ts">): Promise<Ask> {
 
 /**
  * Asks are answered once and never resurface, so removing one rewrites the file.
- * It's the only non-append write outside items.json, and it's small.
+ * Rewriting is a read-modify-write like any other, so it takes the asks lock —
+ * otherwise answering one ask while an agent queues another drops one of them.
  */
 export async function removeAsk(askId: string): Promise<void> {
-  const remaining = (await readAsks()).filter((ask) => ask.id !== askId);
-  await mkdir(FLOW_DIR, { recursive: true });
-  const tmp = `${ASKS_FILE}.${process.pid}.tmp`;
-  await writeFile(tmp, remaining.map((ask) => JSON.stringify(ask)).join("\n") + (remaining.length ? "\n" : ""), "utf8");
-  await rename(tmp, ASKS_FILE);
+  await withLock("asks", async () => {
+    const remaining = (await readAsks()).filter((ask) => ask.id !== askId);
+    const tmp = `${ASKS_FILE}.${process.pid}.tmp`;
+    await writeFile(
+      tmp,
+      remaining.map((ask) => JSON.stringify(ask)).join("\n") + (remaining.length ? "\n" : ""),
+      "utf8",
+    );
+    await rename(tmp, ASKS_FILE);
+  });
 }
 
 export async function readFeedback(since = 0): Promise<Feedback[]> {
@@ -535,19 +607,20 @@ export async function addSignal(signal: Omit<Signal, "id" | "ts">): Promise<Sign
  * without bound. Kept generous — a signal is cheap and re-deriving one is not.
  */
 export async function pruneSignals(weights: Weights, now = Date.now()): Promise<number> {
-  const signals = await readSignals();
-  const horizon = Math.max(weights.decayHalfLifeDays * 8, 30) * 24 * 60 * 60 * 1000;
-  const keep = signals.filter((signal) => {
-    if (signal.expiresAt !== undefined && now > signal.expiresAt) return false;
-    return now - (signal.at ?? signal.ts) < horizon;
-  });
-  if (keep.length === signals.length) return 0;
+  return withLock("signals", async () => {
+    const signals = await readSignals();
+    const horizon = Math.max(weights.decayHalfLifeDays * 8, 30) * 24 * 60 * 60 * 1000;
+    const keep = signals.filter((signal) => {
+      if (signal.expiresAt !== undefined && now > signal.expiresAt) return false;
+      return now - (signal.at ?? signal.ts) < horizon;
+    });
+    if (keep.length === signals.length) return 0;
 
-  await mkdir(FLOW_DIR, { recursive: true });
-  const tmp = `${SIGNALS_FILE}.${process.pid}.tmp`;
-  await writeFile(tmp, keep.map((s) => JSON.stringify(s)).join("\n") + (keep.length ? "\n" : ""), "utf8");
-  await rename(tmp, SIGNALS_FILE);
-  return signals.length - keep.length;
+    const tmp = `${SIGNALS_FILE}.${process.pid}.tmp`;
+    await writeFile(tmp, keep.map((s) => JSON.stringify(s)).join("\n") + (keep.length ? "\n" : ""), "utf8");
+    await rename(tmp, SIGNALS_FILE);
+    return signals.length - keep.length;
+  });
 }
 
 export async function loadWeights(): Promise<Weights> {
@@ -720,7 +793,7 @@ export async function snapshot(message: string): Promise<boolean> {
 /** Turns ~/.flow into a git repo. Idempotent. */
 export async function initGit(): Promise<boolean> {
   await mkdir(FLOW_DIR, { recursive: true });
-  const ignore = ["*.tmp", "inbox.draining", ".last-prioritize", "items.json.corrupt-*", ""].join("\n");
+  const ignore = ["*.tmp", "*.lock", "inbox.draining", ".last-prioritize", "items.json.corrupt-*", ""].join("\n");
   await writeFile(join(FLOW_DIR, ".gitignore"), ignore, "utf8");
 
   const run = (args: string[]) =>
