@@ -61,9 +61,19 @@ Description is deliberately not capturable inline. Add it later with `Cmd+E`, or
 Agents write through `flow`, never by editing the JSON:
 
 ```bash
-npm run build:cli && npm link      # or symlink bin/flow onto your PATH
-flow init                          # writes ~/.flow/AGENTS.md
+npm run install:cli                # bundles and copies to ~/.local/bin/flow
+flow init                          # writes ~/.flow/AGENTS.md, weights.json, git repo
 ```
+
+`install:cli` copies a self-contained bundle rather than symlinking into this repo, so
+moving, renaming or cleaning the checkout can't break capture. It installs to whichever of
+`~/.local/bin` or `~/bin` is already on your PATH (override with `FLOW_BIN`), and tells you
+if neither is. The tradeoff of copying is that the installed binary can drift from source —
+`flow version` prints which build you have, and re-running `install:cli` refreshes it.
+
+The bundle is `.cjs` rather than extensionless on purpose: node picks its module system
+from the nearest `package.json`, so an extensionless file installed under `$HOME` inherits
+whatever that declares. The extension pins it.
 
 ```bash
 flow add 'fix deep link #referral @bug'
@@ -149,10 +159,19 @@ path stays instant.
 | `digest.md` | agents | optional morning brief |
 | `AGENTS.md` | `flow init` | the contract a cold agent reads to orient itself |
 
-`items.json` is written atomically — temp file, then rename — so an agent reading
-mid-write gets the old file or the new one, never a truncated one. Every write re-reads
-from disk first, so the extension, the CLI and an agent can all write without locking and
-without clobbering each other.
+`items.json` is written atomically — temp file, then rename — so a reader arriving
+mid-write gets the old file or the new one, never a truncated one.
+
+Writing safely needs more than that. Atomic writes stop you seeing half a file; they do
+nothing about two writers that both read, both decide, and both write, where the second
+silently discards the first. So every read-modify-write — `items.json`, and the two files
+that get rewritten rather than appended — happens while holding an exclusive lock
+(`items.lock`, `asks.lock`, `signals.lock`, created with `open(path, "wx")`). A lock left
+behind by a crashed process is treated as abandoned after five seconds and broken, so a
+crash can't wedge the list.
+
+Everything else is append-only, which is safe from any number of writers at once and needs
+no lock at all.
 
 ## How the agent loop works
 
