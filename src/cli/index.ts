@@ -118,6 +118,7 @@ const SETTABLE = [
   "title",
   "description",
   "project",
+  "tags",
   "status",
 ] as const;
 
@@ -132,6 +133,7 @@ function coerce(field: string, raw: string): unknown {
     if (raw !== "todo" && raw !== "done") fail("status must be 'todo' or 'done'");
     return raw;
   }
+  if (field === "tags") return raw.split(",").map((tag) => tag.trim().replace(/^@/, "")).filter(Boolean);
   return raw;
 }
 
